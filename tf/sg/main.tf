@@ -1,6 +1,6 @@
 module "test" {
-  source  = "littlejo/security-group/aws"
-  version = "0.2.0"
+  source      = "littlejo/security-group/aws"
+  version     = "0.2.0"
   name        = "test"
   description = "test"
   ingress = [

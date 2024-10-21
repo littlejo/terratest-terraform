@@ -45,6 +45,7 @@ func TestModules(t *testing.T) {
 
 	modules := map[string]string{
 		"sg": tf.SgTF,
+		"secretsmanager": tf.SecretsTF,
 	}
 
 	results := [][]string{
