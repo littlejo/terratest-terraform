@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gruntwork-io/terratest/modules/terraform"
+	terratest "github.com/gruntwork-io/terratest/modules/testing"
 	"github.com/hashicorp/hcl/v2/hclsimple"
 
 	//"go.mercari.io/hcledit"
@@ -50,50 +51,49 @@ func TestModules(t *testing.T) {
 		{"Version", "Validate"},
 	}
 
-	provider := "registry.terraform.io/hashicorp/aws"
-
 	for _, version := range versions {
 		for m, content := range modules {
 			t.Run("TestProviderVersion_"+strings.Replace(version, "~>", "", -1)+m, func(t *testing.T) {
-				validateSuccess := true
-				planSuccess := true
-				applySuccess := true
-				providerVersions := make(map[string]string)
-				tfDir := generateTF(version, content)
-				lockFilePath := tfDir + "/.terraform.lock.hcl"
-				defer os.RemoveAll(tfDir)
-				terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
-					TerraformDir: tfDir,
-					NoColor:      true,
-				})
-				terraform.Init(t, terraformOptions)
-				providerVersions, _ = GetProviderVersions(lockFilePath)
-				fmt.Printf("Provider versions: %v\n", providerVersions)
-				_, err := terraform.ValidateE(t, terraformOptions)
-				if err != nil {
-					validateSuccess = false
-				}
-				_, err = terraform.PlanE(t, terraformOptions)
-				if err != nil {
-					planSuccess = false
-				}
-				_, err = terraform.ApplyE(t, terraformOptions)
-				defer terraform.Destroy(t, terraformOptions)
-				if err != nil {
-					applySuccess = false
-				}
-				defer func() {
-					providerVersion, exists := providerVersions[provider]
-					if !exists {
-						t.Fatalf("Error: provider version not found in providerVersions: %v", providerVersions)
-					}
-					addResult(&results, m, providerVersion, validateSuccess, planSuccess, applySuccess)
-				}()
-
+				testModule(t, version, content, m, &results)
 			})
 		}
 	}
 	printMarkdownMatrix(results)
+}
+
+func testModule(t *testing.T, version, content, moduleName string, results *[][]string) {
+	provider := "registry.terraform.io/hashicorp/aws"
+	providerVersions := make(map[string]string)
+	tfDir := generateTF(version, content)
+	lockFilePath := tfDir + "/.terraform.lock.hcl"
+	defer os.RemoveAll(tfDir)
+	terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
+		TerraformDir: tfDir,
+		NoColor:      true,
+	})
+	terraform.Init(t, terraformOptions)
+	providerVersions, _ = GetProviderVersions(lockFilePath)
+	fmt.Printf("Provider versions: %v\n", providerVersions)
+	validateSuccess := executeTerraformStep(t, terraform.ValidateE, terraformOptions, "validate")
+	planSuccess := executeTerraformStep(t, terraform.PlanE, terraformOptions, "plan")
+	applySuccess := executeTerraformStep(t, terraform.ApplyE, terraformOptions, "apply")
+	defer terraform.Destroy(t, terraformOptions)
+	defer func() {
+		providerVersion, exists := providerVersions[provider]
+		if !exists {
+			t.Fatalf("Error: provider version not found in providerVersions: %v", providerVersions)
+		}
+		addResult(results, moduleName, providerVersion, validateSuccess, planSuccess, applySuccess)
+	}()
+}
+
+func executeTerraformStep(t *testing.T, step func(t terratest.TestingT, options *terraform.Options) (string, error), terraformOptions *terraform.Options, stepName string) bool {
+	_, err := step(t, terraformOptions)
+	if err != nil {
+		t.Logf("%s failed: %v", stepName, err)
+		return false
+	}
+	return true
 }
 
 type LockFile struct {
