@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+//	"sync"
 	//"time"
 	//"io/ioutil"
 	"strings"
@@ -16,16 +17,17 @@ import (
 	"terratest/tf"
 )
 
-func generateTF(version string, tfFile string) string {
+func generateTF(version string, moduleVersion string, tfFile string) string {
 	tfDir, err := os.MkdirTemp("", "terraform")
 	if err != nil {
 		panic(err)
 	}
 	versionsTF := strings.Replace(tf.VersionsTF, "VERSION", version, 1)
+	mainTF := strings.Replace(tfFile, "VERSION", moduleVersion, 1)
 
 	fmt.Println(tfDir)
 
-	tfFileAll := versionsTF + "\n" + tfFile
+	tfFileAll := versionsTF + "\n" + mainTF
 
 	err = os.WriteFile(tfDir+"/main.tf", []byte(tfFileAll), 0644)
 	if err != nil {
@@ -35,17 +37,27 @@ func generateTF(version string, tfFile string) string {
 }
 
 func TestModules(t *testing.T) {
-	t.Parallel()
-
+//	t.Parallel()
 	versions := []string{
 		//"~> 3.0",
-		"~> 4.0",
+		//"~> 4.0",
 		"~> 5.0",
 	}
 
-	modules := map[string]string{
-		"sg": tf.SgTF,
-		"secretsmanager": tf.SecretsTF,
+	type Module struct {
+		Content  string
+		Versions []string
+	}
+
+	modules := map[string]Module{
+		"sg": {
+			Content:  tf.SgTF,
+			Versions: tf.SgTFVersion,
+		},
+		"secretsmanager": {
+			Content:  tf.SecretsTF,
+			Versions: tf.SecretsTFVersion,
+		},
 	}
 
 	results := [][]string{
@@ -53,19 +65,22 @@ func TestModules(t *testing.T) {
 	}
 
 	for _, version := range versions {
-		for m, content := range modules {
-			t.Run("TestProviderVersion_"+strings.Replace(version, "~>", "", -1)+m, func(t *testing.T) {
-				testModule(t, version, content, m, &results)
-			})
+		for name, module := range modules {
+			for _, moduleVersion := range module.Versions {
+				t.Run("TestProviderVersion_"+strings.Replace(version, "~>", "", -1)+name+moduleVersion, func(t *testing.T) {
+					testModule(t, version, module.Content, moduleVersion, name, &results)
+				})
+			}
 		}
 	}
-	printMarkdownMatrix(results)
+	defer printMarkdownMatrix(results)
+
 }
 
-func testModule(t *testing.T, version, content, moduleName string, results *[][]string) {
+func testModule(t *testing.T, version, content, moduleVersion string, moduleName string, results *[][]string) (string, bool, bool, bool){
 	provider := "registry.terraform.io/hashicorp/aws"
 	providerVersions := make(map[string]string)
-	tfDir := generateTF(version, content)
+	tfDir := generateTF(version, moduleVersion, content)
 	lockFilePath := tfDir + "/.terraform.lock.hcl"
 	defer os.RemoveAll(tfDir)
 	terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
@@ -78,14 +93,16 @@ func testModule(t *testing.T, version, content, moduleName string, results *[][]
 	validateSuccess := executeTerraformStep(t, terraform.ValidateE, terraformOptions, "validate")
 	planSuccess := executeTerraformStep(t, terraform.PlanE, terraformOptions, "plan")
 	applySuccess := executeTerraformStep(t, terraform.ApplyE, terraformOptions, "apply")
+	providerVersion, _ := providerVersions[provider]
 	defer terraform.Destroy(t, terraformOptions)
 	defer func() {
 		providerVersion, exists := providerVersions[provider]
 		if !exists {
 			t.Fatalf("Error: provider version not found in providerVersions: %v", providerVersions)
 		}
-		addResult(results, moduleName, providerVersion, validateSuccess, planSuccess, applySuccess)
+		getResult(results, moduleName, moduleVersion, providerVersion, validateSuccess, planSuccess, applySuccess)
 	}()
+	return providerVersion, validateSuccess, planSuccess, applySuccess
 }
 
 func executeTerraformStep(t *testing.T, step func(t terratest.TestingT, options *terraform.Options) (string, error), terraformOptions *terraform.Options, stepName string) bool {
@@ -133,27 +150,27 @@ func GetProviderVersions(lockFilePath string) (map[string]string, error) {
 	return providerVersions, nil
 }
 
-func addResult(results *[][]string, module string, version string, validate bool, plan bool, apply bool) {
-	validateResult := "success"
+func getResult(results *[][]string, module string, moduleVersion string, version string, validate bool, plan bool, apply bool) {
+	validateResult := "✅"
 	if !validate {
-		validateResult = "fail"
+		validateResult = "❌"
 	}
-	planResult := "success"
+	planResult := "✅"
 	if !plan {
-		planResult = "fail"
+		planResult = "❌"
 	}
-	applyResult := "success"
+	applyResult := "✅"
 	if !apply {
-		applyResult = "fail"
+		applyResult = "❌"
 	}
 	*results = append(*results, []string{module, version, validateResult, planResult, applyResult})
 }
 
 func printMarkdownMatrix(results [][]string) {
 	fmt.Println("\n### Terraform Provider Test Results")
-	fmt.Println("Module | Version | Validate| Plan | Apply")
-	fmt.Println("-------|---------|---------|-------|------|")
+	fmt.Println("Module | module Version | provider Version | Validate| Plan | Apply")
+	fmt.Println("-------|---------|---------|-------|------|-------|")
 	for _, row := range results[1:] {
-		fmt.Printf("| %s | %s | %s | %s | %s |\n", row[0], row[1], row[2], row[3], row[4])
+		fmt.Printf("| %s | %s | %s | %s | %s | %s |\n", row[0], row[1], row[2], row[3], row[4], row[5])
 	}
 }
