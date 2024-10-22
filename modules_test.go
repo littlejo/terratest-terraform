@@ -3,16 +3,13 @@ package test
 import (
 	"fmt"
 	"os"
-	"testing"
-	//"time"
-	//"io/ioutil"
 	"strings"
+	"testing"
 
 	"github.com/gruntwork-io/terratest/modules/terraform"
 	terratest "github.com/gruntwork-io/terratest/modules/testing"
 	"github.com/hashicorp/hcl/v2/hclsimple"
 
-	//"go.mercari.io/hcledit"
 	"terratest/tf"
 )
 
@@ -36,7 +33,6 @@ func generateTF(version string, moduleVersion string, tfFile string) string {
 }
 
 func TestModules(t *testing.T) {
-	t.Parallel()
 
 	versions := []string{
 		//"~> 3.0",
@@ -60,23 +56,20 @@ func TestModules(t *testing.T) {
 		},
 	}
 
-	results := [][]string{
-		{"Version", "Validate"},
-	}
-
 	for _, version := range versions {
 		for name, module := range modules {
 			for _, moduleVersion := range module.Versions {
 				t.Run("TestProviderVersion_"+strings.Replace(version, "~>", "", -1)+name+moduleVersion, func(t *testing.T) {
-					testModule(t, version, module.Content, moduleVersion, name, &results)
+					t.Parallel()
+					testModule(t, version, module.Content, moduleVersion, name)
 				})
 			}
 		}
 	}
-	printMarkdownMatrix(results)
+
 }
 
-func testModule(t *testing.T, version, content, moduleVersion string, moduleName string, results *[][]string) {
+func testModule(t *testing.T, version, content, moduleVersion string, moduleName string) {
 	provider := "registry.terraform.io/hashicorp/aws"
 	providerVersions := make(map[string]string)
 	tfDir := generateTF(version, moduleVersion, content)
@@ -98,7 +91,7 @@ func testModule(t *testing.T, version, content, moduleVersion string, moduleName
 		if !exists {
 			t.Fatalf("Error: provider version not found in providerVersions: %v", providerVersions)
 		}
-		addResult(results, moduleName, moduleVersion, providerVersion, validateSuccess, planSuccess, applySuccess)
+		addResult(moduleName, moduleVersion, providerVersion, validateSuccess, planSuccess, applySuccess)
 	}()
 }
 
@@ -147,7 +140,7 @@ func GetProviderVersions(lockFilePath string) (map[string]string, error) {
 	return providerVersions, nil
 }
 
-func addResult(results *[][]string, module string, moduleVersion string, version string, validate bool, plan bool, apply bool) {
+func addResult(module string, moduleVersion string, version string, validate bool, plan bool, apply bool) {
 	validateResult := "success"
 	if !validate {
 		validateResult = "fail"
@@ -160,14 +153,47 @@ func addResult(results *[][]string, module string, moduleVersion string, version
 	if !apply {
 		applyResult = "fail"
 	}
-	*results = append(*results, []string{module, moduleVersion, version, validateResult, planResult, applyResult})
+	results := [][]string{
+		{module, moduleVersion, version, validateResult, planResult, applyResult},
+	}
+	printMarkdownMatrix(results, "/tmp/results")
 }
 
-func printMarkdownMatrix(results [][]string) {
-	fmt.Println("\n### Terraform Provider Test Results")
-	fmt.Println("Module | module Version | provider Version | Validate| Plan | Apply")
-	fmt.Println("-------|---------|---------|-------|------|-------|")
-	for _, row := range results[1:] {
-		fmt.Printf("| %s | %s | %s | %s | %s | %s |\n", row[0], row[1], row[2], row[3], row[4], row[5])
+func printMarkdownMatrix(results [][]string, filename string) error {
+	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("could not open file: %w", err)
 	}
+	defer file.Close()
+
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("could not stat file: %w", err)
+	}
+
+	if fileInfo.Size() == 0 {
+		_, err = file.WriteString("\n### Terraform Provider Test Results\n")
+		if err != nil {
+			return fmt.Errorf("could not write to file: %w", err)
+		}
+
+		_, err = file.WriteString("Module | module Version | provider Version | Validate| Plan | Apply\n")
+		if err != nil {
+			return fmt.Errorf("could not write to file: %w", err)
+		}
+
+		_, err = file.WriteString("-------|---------|---------|-------|------|-------|\n")
+		if err != nil {
+			return fmt.Errorf("could not write to file: %w", err)
+		}
+	}
+
+	for _, row := range results {
+		_, err := file.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s |\n", row[0], row[1], row[2], row[3], row[4], row[5]))
+		if err != nil {
+			return fmt.Errorf("could not write to file: %w", err)
+		}
+	}
+
+	return nil
 }
