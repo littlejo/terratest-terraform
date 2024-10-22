@@ -1,7 +1,7 @@
 module "test" {
   source      = "littlejo/security-group/aws"
-  version     = "0.2.0"
-  name        = "test"
+  version     = "VERSION"
+  name        = random_pet.name.id
   description = "test"
   ingress = [
     {
@@ -17,4 +17,7 @@ module "test" {
       protocol    = "tcp,udp"
     },
   ]
+}
+
+resource "random_pet" "name" {
 }

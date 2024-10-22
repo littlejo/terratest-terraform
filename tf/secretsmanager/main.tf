@@ -1,7 +1,10 @@
 module "secretsmanager" {
   source  = "littlejo/secretsmanager/aws"
-  version = "0.2.0"
+  version = "VERSION"
 
-  name        = "test"
+  name        = random_pet.name.id
   description = "test"
+}
+
+resource "random_pet" "name" {
 }
