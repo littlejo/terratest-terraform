@@ -43,9 +43,20 @@ func TestModules(t *testing.T) {
 		"~> 5.0",
 	}
 
-	modules := map[string]string{
-		"sg": tf.SgTF,
-		"secretsmanager": tf.SecretsTF,
+	type Module struct {
+		Content  string
+		Versions []string
+	}
+
+	modules := map[string]Module{
+		"sg": {
+			Content:  tf.SgTF,
+			Versions: tf.SgTFVersion,
+		},
+		"secretsmanager": {
+			Content:  tf.SecretsTF,
+			Versions: tf.SecretsTFVersion,
+		},
 	}
 
 	results := [][]string{
@@ -53,10 +64,12 @@ func TestModules(t *testing.T) {
 	}
 
 	for _, version := range versions {
-		for m, content := range modules {
-			t.Run("TestProviderVersion_"+strings.Replace(version, "~>", "", -1)+m, func(t *testing.T) {
-				testModule(t, version, content, m, &results)
-			})
+		for name, module := range modules {
+			for _, moduleVersion := range module.Versions {
+				t.Run("TestProviderVersion_"+strings.Replace(version, "~>", "", -1)+name+moduleVersion, func(t *testing.T) {
+					testModule(t, version, module.Content, moduleVersion, name, &results)
+				})
+			}
 		}
 	}
 	printMarkdownMatrix(results)
